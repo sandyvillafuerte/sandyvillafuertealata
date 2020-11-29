@@ -1,0 +1,441 @@
+import pandas as pd ## Manejo de dataframes o set de datos
+import numpy as np
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
+
+active_promos = pd.read_csv("/content/drive/My Drive/RETO_CUP2020/active_promos.csv") 
+clients_attributes = pd.read_csv("/content/drive/My Drive/RETO_CUP2020/clients_attributes.csv") 
+executed_promos = pd.read_csv("/content/drive/My Drive/RETO_CUP2020/executed_promos.csv") 
+sales= pd.read_csv("/content/drive/My Drive/RETO_CUP2020/sales.csv", encoding='latin-1')
+test= pd.read_csv("/content/drive/My Drive/RETO_CUP2020/test.csv")
+
+print(sales.shape)
+print("Numero de Clientes con compra:", len(pd.unique(sales['Cliente'])))
+sales.head()
+
+#calculando la suma de Facturación, litros, Dcto
+sale_df=sales[['Año','Mes','Cliente','Nr','Marca', 'Cupo','Hl', 'Dcto','ClaseEnvase','SegmentoPrecio']].groupby(['Año', 'Mes','Cliente','Marca', 'Cupo'], dropna=False)[['Nr', 'Hl', 'Dcto']].sum()
+sale_df=sale_df.reset_index()
+
+#calculando la cantidad de compras por cliente por mes_año xcupoxmarca
+sale_df2=sales[['Año','Mes','Cliente','Nr','Marca', 'Cupo','Hl', 'Dcto','ClaseEnvase','SegmentoPrecio']].groupby(['Año', 'Mes','Cliente','Marca', 'Cupo'], dropna=False)[['Nr']].count()
+sale_df2=sale_df2.reset_index()
+sale_df2.rename(columns={'Nr':'cnt_compra'}, inplace=True)
+sale_df = pd.concat([sale_df, sale_df2['cnt_compra']], axis=1)
+sale_df.head()
+
+#calculando la cantidad de compras por cliente por mes_año
+cnt_compra=sales[['Año','Mes','Cliente','Nr']].groupby(['Año', 'Mes','Cliente'], dropna=False)['Nr'].count()
+cnt_compra=cnt_compra.reset_index()
+cnt_compra.rename(columns={'Nr':'cnt_xmes'}, inplace=True)
+cnt_compra.head()
+
+print(clients_attributes.shape)
+clients_attributes.head()
+
+pip install DateTime
+
+
+from datetime import datetime
+#creando antiguedad del cliente
+clients_attributes.FechaAltaCliente=clients_attributes.FechaAltaCliente.astype('string')
+#datetime.strftime(clients_attributes['FechaAltaCliente'], '%d-%m-%Y')
+clients_attributes['FechaAltaCliente_dt']=pd.to_datetime(clients_attributes['FechaAltaCliente'])
+
+import datetime
+hoy1 = datetime.datetime.utcnow()
+d2 = hoy1.strftime("%Y-%m-%d")
+clients_attributes['Fech_hoy']=pd.to_datetime(d2)
+
+clients_attributes['Antiguedad']=clients_attributes['Fech_hoy']-clients_attributes['FechaAltaCliente_dt']
+clients_attributes['Antiguedad']=clients_attributes['Antiguedad'].astype('str')
+
+Antiguedad=clients_attributes['Antiguedad'].str.split(' ', expand=True)
+Antiguedad.columns = ['Antiguedad_dias', 'days']
+clients_attributes = pd.concat([clients_attributes, Antiguedad['Antiguedad_dias']], axis=1)
+clients_attributes['Antiguedad_años']=round(clients_attributes['Antiguedad_dias'].astype('int')/365,0).astype('int')
+
+#Antiguedad en Meses, para tener mayor variación en la variable.
+clients_attributes['Antiguedad_Mes']=round(clients_attributes['Antiguedad_dias'].astype('int')/30,0).astype('int')
+
+clients_attributes.describe()
+
+print(active_promos.shape)
+active_promos.sort_values(by = 'CodigoDC')
+active_promos.head()
+
+Fecha_Desde=active_promos['Fecha_Desde'].str.split('-', expand=True)
+Fecha_Desde.columns = ['Fecha_Desde_Y', 'Fecha_Desde_M','Fecha_Desde_D']
+active_promos = pd.concat([active_promos, Fecha_Desde], axis=1)
+
+Fecha_Hasta=active_promos['Fecha_Hasta'].str.split('-', expand=True)
+Fecha_Hasta.columns = ['Fecha_Hasta_Y', 'Fecha_Hasta_M','Fecha_Hasta_D']
+active_promos = pd.concat([active_promos, Fecha_Hasta], axis=1)
+
+active_promos.Fecha_Hasta_D=active_promos.Fecha_Hasta_D.astype('int')
+active_promos.Fecha_Desde_D=active_promos.Fecha_Desde_D.astype('int')
+active_promos.Fecha_Hasta_M=active_promos.Fecha_Hasta_M.astype('int')
+active_promos.Fecha_Desde_M=active_promos.Fecha_Desde_M.astype('int')
+
+#creando la cantidad de ofertas recibidas por el cliente x mes-añoxmarcaxcupo
+cnt_promo=active_promos.groupby(['Fecha_Desde_Y', 'Fecha_Desde_M','Fecha_Hasta_M','Cliente','Marca','Cupo'], dropna=False)['CodigoDC'].count()
+cnt_promo=cnt_promo.reset_index()
+cnt_promo.rename(columns={'CodigoDC':'cnt_promo_xmes',
+                          'Fecha_Desde_Y':'Año',
+                          'Fecha_Hasta_M':'Mes_hasta',
+                          'Fecha_Desde_M':'Mes_desde'}, inplace=True)
+cnt_promo.shape
+
+
+#creando la cantida de ofertas recibidas por el cliente x por marca x cupo xaño
+cnt_promo2=active_promos.groupby(['Fecha_Desde_Y','Cliente','Marca','Cupo'], dropna=False)['CodigoDC'].count()
+cnt_promo2=cnt_promo2.reset_index()
+cnt_promo2.rename(columns={'CodigoDC':'cnt_promo_xaño',
+                          'Fecha_Desde_Y':'Año'}, inplace=True)
+cnt_promo2.head()
+
+print(executed_promos.shape)
+executed_promos.head()
+
+executed_promos['Target']='1'
+
+
+print(test.shape)
+test.head()
+
+#Se empezará con la consolidación de variables en el Dataframe que se usara en el modelo. Primero se crea un Dataframe con las promociones,
+#las cuales tienen asignado un año y un mes.
+df_promo = active_promos[['CodigoDC','Cliente', 'Marca', 'Cupo','Fecha_Hasta_Y','Fecha_Desde_M','Fecha_Hasta_M']]   #'duracion'
+df_promo.columns = ['CodigoDC','Cliente', 'Marca', 'Cupo','Año','Mes_desde','Mes_hasta']   # 'duracion'
+df_promo[['Año','Mes_desde', 'Mes_hasta']] = df_promo[['Año','Mes_desde', 'Mes_hasta' ]].astype('int')
+df_promo.head()
+
+#Ahora bien, se añadirá con el número del cliente sus atributos
+df_promoAtributos = df_promo.merge(clients_attributes, on = 'Cliente', how = 'left')
+num = df_promoAtributos['Region'].isna().sum()
+print('Number of clients without attributes:', num)
+df_promoAtributos.head()
+
+#Se crea el nuevo DF
+Marca_Cupo = sales.groupby(by = ['Marca', 'Cupo']).first()[['ClaseEnvase', 'SegmentoPrecio']]
+#Se Combina
+df_modelo = df_promoAtributos.merge(Marca_Cupo, on = ['Marca', 'Cupo'], how='left')
+df_modelo = df_modelo[['CodigoDC','Marca','Cupo','Cliente','Año','Mes_desde', 'Mes_hasta', 'Region', 'Gerencia', 'SubCanal', 'TipoPoblacion','Estrato', 'EF', 'ClaseEnvase', 'SegmentoPrecio', 'Antiguedad_Mes']] #'duracion'
+df_modelo.head() 
+
+df_modelo1=df_modelo[df_modelo['Mes_desde']==df_modelo['Mes_hasta']]
+df_modelo1['Mes']=df_modelo1['Mes_desde']
+df_modelo2=df_modelo[df_modelo['Mes_desde']!=df_modelo['Mes_hasta']]
+df_modelo2_1=df_modelo2
+df_modelo2_2=df_modelo2
+
+df_modelo2_1['Mes']=df_modelo2['Mes_desde']
+df_modelo2_2['Mes']=df_modelo2['Mes_hasta']
+
+df_modelo2_new=pd.concat([df_modelo2_1, df_modelo2_2], axis=0, ignore_index=True)
+df_modelo=pd.concat([df_modelo1, df_modelo2_new], axis=0, ignore_index=True)
+
+se van a agregar las siguientes variables: sale_df, cnt_compra, cnt_promo2.
+
+#Agregar Sale_df por Cliente, Año, Mes, Marca, Cupo
+df_new_modelo = df_modelo.merge(sale_df,on= ['Cliente', 'Mes', 'Año','Marca','Cupo'], how='left')
+num = df_new_modelo['Nr'].isna().sum()
+print('Number of promos without sale:', num)
+df_new_modelo.head(10)
+
+#Agregar cnt_compra
+df_new_modelo = df_new_modelo.merge(cnt_compra,on=['Año','Mes','Cliente'],how='left')
+df_new_modelo.head()
+
+#Agregar cnt_promo2
+cnt_promo2[['Año']] = cnt_promo2[['Año']].astype('int')
+df_new_modelo = df_new_modelo.merge(cnt_promo2, on = ['Cliente','Año','Marca','Cupo'],how='left')
+df_new_modelo.head()
+
+#cruzando con la tabla executed_promos
+
+df_new_modelo_view = df_new_modelo.merge(executed_promos, on = ['CodigoDC','Cliente','Marca','Cupo'],how='left')
+df_new_modelo_view.fillna(value = 0, inplace = True)
+
+df_new_modelo_view[(df_new_modelo_view['Target']=='1') & (df_new_modelo_view['Nr']==0)]
+
+df_modelo_sin_CodDC=df_new_modelo_view.drop(labels = ['CodigoDC','Año', 'Mes_desde', 'Mes_hasta', 'Mes'],axis=1)
+df_modelo_sin_CodDC[['Marca','Cupo','Cliente','Region','Gerencia','SubCanal','TipoPoblacion','Estrato','EF','ClaseEnvase','SegmentoPrecio', 'Target']] = df_modelo_sin_CodDC[['Marca','Cupo','Cliente','Region','Gerencia','SubCanal','TipoPoblacion','Estrato','EF','ClaseEnvase','SegmentoPrecio','Target']].astype('object')
+df_modelo_sin_CodDC.dtypes
+
+#Normalización de Variables Continuas
+scaler = StandardScaler()
+temp = df_modelo_sin_CodDC[['Antiguedad_Mes','Nr','Hl','Dcto','cnt_compra','cnt_xmes','cnt_promo_xaño']]  #'duracion'
+df_modelo_sin_CodDC[['Antiguedad_Mes','Nr','Hl','Dcto','cnt_compra','cnt_xmes','cnt_promo_xaño']]= scaler.fit_transform(temp)  #'duracion'
+df_modelo_sin_CodDC.describe()
+
+
+df_modelo_sin_CodDC.rename(columns={'Target':'Ejecuto_Promo'}, inplace=True)
+
+Partición Muestral de Datos
+
+#Se necesita balancear, ya que solo el 11% son 1, por que el modelo no lo esta prediciendo muy bien
+df_modelo_sin_CodDC.Ejecuto_Promo.value_counts()/df_modelo_sin_CodDC.shape[0]
+# Conteo de clases
+count_class_0, count_class_1 = df_modelo_sin_CodDC.Ejecuto_Promo.value_counts()
+print('Cantidades por fila de clase:')
+print('Class_0:',count_class_0)
+print('Class_1:',count_class_1)
+
+!pip install imblearn
+#SMOTE
+from imblearn.over_sampling import SMOTE
+
+#Separación de predictoras y predicha
+X_smote = df_modelo_sin_CodDC.drop('Ejecuto_Promo', axis=1)
+y_smote = df_modelo_sin_CodDC['Ejecuto_Promo']
+
+smote = SMOTE(ratio='minority')
+X_sm, y_sm = smote.fit_sample(X_smote, y_smote)
+
+df_X_sm = pd.DataFrame(data=X_sm,columns=X_smote.columns)
+df_y_sm = pd.DataFrame(data=y_sm,columns=["Ejecuto_Promo"])
+
+# Concatenamos la información
+df_balanceado_sm = pd.concat([df_X_sm, df_y_sm], axis=1)
+df_balanceado_sm.Ejecuto_Promo.value_counts()
+## Si deseamos balancear, podemos hacerlo con toda la informacion?
+# Creación de la data de train y la data de test
+from sklearn.model_selection import train_test_split
+X_train, X_test, y_train, y_test = train_test_split(df_balanceado_sm.drop('Ejecuto_Promo', axis=1), # (X,y,%test,estratificacion)
+                                                    df_balanceado_sm['Ejecuto_Promo'], 
+                                                    test_size=0.33,
+                                                    stratify=df_balanceado_sm['Ejecuto_Promo'], #PERMITE QUE SE MANTENGA LA MISMA PROPORCIÓN DE TODA LA DATA DE 0 Y 1, EN EL TRAIN Y TEST.
+                                                    random_state=100)
+                                                    
+                                                    
+#MODELANDO                                                 
+import matplotlib.pyplot as plt
+from sklearn import metrics
+from sklearn.ensemble import ExtraTreesClassifier
+
+# Seleccion por Random Forest
+from sklearn.ensemble import RandomForestClassifier # Paso01: Instancio el algoritmo
+forest = RandomForestClassifier()                   # Paso02: Configuro el algoritmo
+forest.fit(X_train, y_train)                        # Paso03: Ajuste el algoritmo
+importances = forest.feature_importances_           # Variables importantes
+
+# Seleccion por Random Forest
+TablaImportancia = pd.concat([pd.DataFrame({'Driver':list(X_train.columns)}),
+                              pd.DataFrame({'Importancia':list(forest.feature_importances_)})], axis = 1)
+ImportanciaVariables = TablaImportancia[['Driver','Importancia']].sort_values('Importancia', ascending = False).reset_index(drop = True)
+ImportanciaVariables
+
+
+X_train, X_test, y_train, y_test = train_test_split(df_balanceado_sm[['Nr','Hl','cnt_compra']], # (X,y,%test,estratificacion)
+                                                    df_balanceado_sm['Ejecuto_Promo'], 
+                                                    test_size=0.33,
+                                                    stratify=df_balanceado_sm['Ejecuto_Promo'], #PERMITE QUE SE MANTENGA LA MISMA PROPORCIÓN DE TODA LA DATA DE 0 Y 1, EN EL TRAIN Y TEST.
+                                                    random_state=100)
+                                                    
+                                                    
+#Regresión Logística Binaria
+# Paso N°01: Llamar un algoritmo predictivos
+from sklearn.linear_model import LogisticRegression
+
+RegLog = LogisticRegression(max_iter=1000) # Paso N°02: Configuro el algoritmo
+RegLog.fit(X_train, y_train)  # Paso N°03: Entreno o ajusto el algoritmo predictivo a los datos
+
+# Paso N°04: Predecir con el algoritmo entrenado para validar
+y_pred_train=RegLog.predict(X_train) # Prediccion sobre el train
+y_pred_test= RegLog.predict(X_test) # Prediccion sobre el test
+
+# Paso N°05: Comparar el valor pronosticado con el valor real
+
+from sklearn import metrics as metrics
+# Matriz de confusion
+print("Matriz confusion: Train")
+cm_train = metrics.confusion_matrix(y_train,y_pred_train)
+print(cm_train)
+
+print("Matriz confusion: Test")
+cm_test = metrics.confusion_matrix(y_test,y_pred_test)
+print(cm_test)
+
+# Accuracy
+print("Accuracy: Train")
+accuracy_train=metrics.accuracy_score(y_train,y_pred_train)
+print(accuracy_train)
+
+print("Accuracy: Test")
+accuracy_test=metrics.accuracy_score(y_test,y_pred_test)
+print(accuracy_test)
+
+# Precision
+print("Precision: Train")
+precision_train=metrics.precision_score(y_train,y_pred_train)
+print(precision_train)
+
+print("Precision: Test")
+precision_test=metrics.precision_score(y_test,y_pred_test)
+print(precision_test)
+
+# Recall
+print("Recall: Train")
+recall_train=metrics.recall_score(y_train,y_pred_train)
+print(recall_train)
+
+print("Recall: Test")
+recall_test=metrics.recall_score(y_test,y_pred_test)
+print(recall_test)
+
+#arbol
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
+
+#Creación de muestras de train y test
+tree = DecisionTreeClassifier()
+tree_model = tree.fit(X_train, y_train)
+y_pred_train = tree_model.predict(X_train)
+y_pred_test = tree_model.predict(X_test)
+
+from sklearn import metrics as metrics
+# Matriz de confusion
+print("Matriz confusion: Train")
+cm_train = metrics.confusion_matrix(y_train,y_pred_train)
+print(cm_train)
+
+print("Matriz confusion: Test")
+cm_test = metrics.confusion_matrix(y_test,y_pred_test)
+print(cm_test)
+
+# Accuracy
+print("Accuracy: Train")
+accuracy_train=metrics.accuracy_score(y_train,y_pred_train)
+print(accuracy_train)
+
+print("Accuracy: Test")
+accuracy_test=metrics.accuracy_score(y_test,y_pred_test)
+print(accuracy_test)
+
+# Precision
+print("Precision: Train")
+precision_train=metrics.precision_score(y_train,y_pred_train)
+print(precision_train)
+
+print("Precision: Test")
+precision_test=metrics.precision_score(y_test,y_pred_test)
+print(precision_test)
+
+# Recall
+print("Recall: Train")
+recall_train=metrics.recall_score(y_train,y_pred_train)
+print(recall_train)
+
+print("Recall: Test")
+recall_test=metrics.recall_score(y_test,y_pred_test)
+print(recall_test)
+
+
+#para el arbol
+y_pred_test_proba = tree_model.predict_proba(X_test)
+y_pred_test_proba = y_pred_test_proba[:][: , 1]
+
+#para la logistica
+y_pred_test_proba = RegLog.predict_proba(X_test)
+y_pred_test_proba = y_pred_test_proba[:][: , 1]
+
+from sklearn.metrics import roc_curve, roc_auc_score, confusion_matrix, precision_recall_curve
+
+fpr, tpr, thresholds = roc_curve(y_test, 
+                                 y_pred_test_proba)
+# plot the ROC curve
+plt.plot(fpr, tpr)
+# plot a secondary diagonal line, with dashed line style and black color to represent a no-skill classifier
+plt.plot(fpr, fpr, linestyle = '--', color = 'k')
+plt.xlabel('False positive rate')
+plt.ylabel('True positive rate')
+plt.title('ROC curve');
+
+
+
+# Calculate the Area Under the Receiver Operating Characteristic Curve (AUROC) on our test set
+AUROC = roc_auc_score(y_test, y_pred_test_proba)
+# calculate Gini from AUROC
+Gini = AUROC * 2 - 1
+# print AUROC and Gini
+print('AUROC: %.4f' % (AUROC))
+print('Gini: %.4f' % (Gini))
+
+
+#test
+
+
+df_modelo_reciente = df_new_modelo_view.drop(labels = ['CodigoDC', 'Mes_desde', 'Mes_hasta'],axis=1)
+scalerTemplate = StandardScaler()
+temp = df_modelo_reciente[['Nr','Hl','cnt_compra']] 
+df_modelo_reciente[['Nr','Hl','cnt_compra']]= scalerTemplate.fit_transform(temp)
+df_modelo_reciente = df_modelo_reciente[(df_modelo_reciente['Año'] == 2019) & (df_modelo_reciente['Mes']>3)]
+
+df_TemplateTest = df_modelo_reciente[['Cliente', 'Marca', 'Cupo', 'cnt_compra','Nr', 'Hl']].groupby(['Cliente','Marca','Cupo']).mean()
+df_TemplateTest.reset_index(inplace=True)
+df_TemplateTest.head()
+
+
+df_validation = test.merge(df_TemplateTest,on = ['Cliente','Marca','Cupo'],how='left')
+print(df_validation['Nr'].isna().sum())
+print(df_validation['cnt_compra'].isnull().sum())
+
+df_scoring = df_validation.drop(['Cliente', 'Ejecuto_Promo','Marca','Cupo'],axis=1)
+
+y_scoring = RegLog.predict_proba(df_scoring) 
+y_scoring
+
+y_scoring=pd.DataFrame(y_scoring)
+
+y_scoring.rename(columns={1:'Ejecuto_Promo'}, inplace=True)
+y_scoring['Ejecuto_Promo']
+
+# Juntamos el ID con la clase
+data = np.hstack((df_validation['Cliente','Marca','Cupo'].values.reshape(-1,1), y_scoring.reshape(-1,1)))
+# Le asignamos nombres a las columnas
+df_submmit = pd.DataFrame(data, columns=['Loan_ID','Ejecuto_Promo'])
+
+df_submmit=pd.concat([df_validation[['Cliente','Marca','Cupo']],y_scoring['Ejecuto_Promo']], axis=1)
+
+df_submmit_orden = test.merge(df_submmit,on = ['Cliente','Marca','Cupo'],how='left')
+df_submmit_orden.head()
+
+df_submmit_orden = df_submmit_orden.drop([ 'Ejecuto_Promo_x'],axis=1)
+df_submmit_orden.rename(columns={'Ejecuto_Promo_y':'Ejecuto_Promo'}, inplace=True)
+
+df_submmit_orden.to_csv('/content/drive/My Drive/RETO_CUP2020/reg_log_2_CUP2020.csv', index=False)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
